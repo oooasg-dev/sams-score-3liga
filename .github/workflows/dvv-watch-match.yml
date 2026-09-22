@@ -1,0 +1,49 @@
+name: DVV — Отслеживать матч
+
+# Запускается вручную из вкладки Actions. Любой коллега с доступом к
+# репозиторию может ввести matchUuid своего матча и нажать "Run workflow".
+# Job сам пишет живые данные в Firebase (dvv_live/{matchUuid}) всё время,
+# пока идёт, и останавливается сам, когда матч закончится (или по таймауту).
+
+on:
+  workflow_dispatch:
+    inputs:
+      match_uuid:
+        description: 'matchUuid матча (из dvv_find_match.js или URL страницы тикера)'
+        required: true
+      label:
+        description: 'Название матча для логов (необязательно)'
+        required: false
+        default: 'матч'
+      poll_interval_seconds:
+        description: 'Как часто опрашивать сайт, секунд'
+        required: false
+        default: '15'
+      max_runtime_minutes:
+        description: 'Максимальное время работы job, минут (страховка)'
+        required: false
+        default: '240'
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 260
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install
+
+      - name: Создать watchlist из входных параметров
+        run: |
+          echo '[{"matchUuid":"${{ github.event.inputs.match_uuid }}","label":"${{ github.event.inputs.label }}"}]' > dvv_watchlist.json
+          cat dvv_watchlist.json
+
+      - name: Запустить мост
+        env:
+          DVV_POLL_INTERVAL_MS: ${{ fromJSON(github.event.inputs.poll_interval_seconds) * 1000 }}
+          DVV_MAX_RUNTIME_MIN: ${{ github.event.inputs.max_runtime_minutes }}
+        run: node dvv_bridge.js
