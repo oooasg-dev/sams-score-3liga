@@ -1,0 +1,26 @@
+name: DVV — Найти матч
+
+# Запускается вручную. Вводите название команды(-мана) — результат
+# (список matchUuid) появится в логе job'ы (вкладка Actions → этот run).
+
+on:
+  workflow_dispatch:
+    inputs:
+      team1:
+        description: 'Название команды (как на сайте DVV)'
+        required: true
+      team2:
+        description: 'Вторая команда (необязательно, чтобы сузить поиск)'
+        required: false
+        default: ''
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: node dvv_find_match.js "${{ github.event.inputs.team1 }}" "${{ github.event.inputs.team2 }}"
