@@ -39,6 +39,6 @@ jobs:
 
       - name: Запустить мост
         env:
-          DVV_POLL_INTERVAL_MS: ${{ fromJSON(github.event.inputs.poll_interval_seconds) * 1000 }}
+          DVV_POLL_INTERVAL_SEC: ${{ github.event.inputs.poll_interval_seconds }}
           DVV_MAX_RUNTIME_MIN: ${{ github.event.inputs.max_runtime_minutes }}
         run: node dvv_bridge.js
