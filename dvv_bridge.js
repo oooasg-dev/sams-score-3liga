@@ -38,10 +38,15 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { computeRallyStats } = require('./compute_rally_stats');
 
 const TICKER_URL = 'https://backend.sams-ticker.de/live/indoor/tickers/dvv';
 const FIREBASE_BASE_URL = 'https://sams-score-3liga-default-rtdb.europe-west1.firebasedatabase.app';
-const POLL_INTERVAL_MS = Number(process.env.DVV_POLL_INTERVAL_MS || 15000);
+const POLL_INTERVAL_MS = Number(
+  process.env.DVV_POLL_INTERVAL_MS ||
+  (process.env.DVV_POLL_INTERVAL_SEC ? Number(process.env.DVV_POLL_INTERVAL_SEC) * 1000 : 15000)
+);
+const archivedThisRun = new Set(); // matchUuid, уже заархивированные в этом запуске
 const MAX_TIMEOUTS_PER_SET = 2;
 
 const POSITION_MAP = {
@@ -224,6 +229,28 @@ function computeMatchPayload(feedData, watch) {
   return payload;
 }
 
+async function archiveFinishedMatch(state, matchUuid, meta, label) {
+  // 1) сырой state целиком (включая eventHistory) — из него можно пересчитать что угодно позже
+  await axios.put(`${FIREBASE_BASE_URL}/archive/${matchUuid}.json`, {
+    archivedAt: new Date().toISOString(),
+    meta,
+    state,
+  });
+
+  // 2) статистика розыгрышей
+  const stats = computeRallyStats(state);
+  await axios.put(`${FIREBASE_BASE_URL}/match_stats/${matchUuid}.json`, {
+    computedAt: new Date().toISOString(),
+    meta,
+    ...stats,
+  });
+
+  console.log(`[${label}] АРХИВ сохранён: archive/${matchUuid}, match_stats/${matchUuid}`);
+  if (stats.warnings.length) {
+    stats.warnings.forEach(w => console.warn(`[${label}] предупреждение статистики: ${w}`));
+  }
+}
+
 async function syncOneMatch(feedData, watch) {
   const { matchUuid, label } = watch;
   const payload = computeMatchPayload(feedData, watch);
@@ -233,6 +260,17 @@ async function syncOneMatch(feedData, watch) {
   }
 
   await axios.put(`${FIREBASE_BASE_URL}/dvv_live/${matchUuid}.json`, payload);
+
+  // Матч завершён -> один раз сохраняем сырой state и считаем статистику,
+  // пока матч не выпал из ~8-дневного окна фида DVV.
+  if (payload.live.finished && !archivedThisRun.has(matchUuid)) {
+    try {
+      await archiveFinishedMatch(feedData.matchStates[matchUuid], matchUuid, payload.meta, label);
+      archivedThisRun.add(matchUuid);
+    } catch (e) {
+      console.error(`[${label}] не удалось заархивировать матч (повторю на следующем опросе):`, e.message);
+    }
+  }
   const live = payload.live;
   console.log(`[${label}] OK  сет ${live.setNumber}  счёт ${live.currentSetScore.team1}:${live.currentSetScore.team2}  подача: ${live.servingTeam}  ${live.finished ? '(матч завершён)' : ''}`);
   return payload;
