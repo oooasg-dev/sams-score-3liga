@@ -1,15 +1,11 @@
-name: DVV — Отслеживать матч
+name: DVV — Отслеживать матч(и)
 
 on:
   workflow_dispatch:
     inputs:
       match_uuid:
-        description: 'matchUuid матча (из dvv_find_match.js или URL страницы тикера)'
+        description: 'matchUuid матча. Можно несколько через запятую: uuid1,uuid2,uuid3'
         required: true
-      label:
-        description: 'Название матча для логов (необязательно)'
-        required: false
-        default: 'матч'
       poll_interval_seconds:
         description: 'Как часто опрашивать сайт, секунд'
         required: false
@@ -33,8 +29,14 @@ jobs:
       - run: npm install
 
       - name: Создать watchlist из входных параметров
+        env:
+          UUIDS: ${{ github.event.inputs.match_uuid }}
         run: |
-          echo '[{"matchUuid":"${{ github.event.inputs.match_uuid }}","label":"${{ github.event.inputs.label }}"}]' > dvv_watchlist.json
+          node -e "
+          const list = process.env.UUIDS.split(',').map(s => s.trim()).filter(Boolean).map(u => ({ matchUuid: u }));
+          require('fs').writeFileSync('dvv_watchlist.json', JSON.stringify(list));
+          console.log('Матчей в списке:', list.length);
+          "
           cat dvv_watchlist.json
 
       - name: Запустить мост
