@@ -65,7 +65,7 @@ function loadWatchlist() {
   const cfgPath = path.join(__dirname, 'dvv_watchlist.json');
   if (fs.existsSync(cfgPath)) {
     const list = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    return list.map(x => (typeof x === 'string' ? { matchUuid: x, label: x } : x));
+    return list.map(x => (typeof x === 'string' ? { matchUuid: x, label: x } : { ...x, label: x.label || x.matchUuid }));
   }
   const arg = process.argv[2];
   if (arg) {
@@ -268,6 +268,26 @@ function computeMatchPayload(feedData, watch) {
   return payload;
 }
 
+function matchTitle(meta) {
+  // Человекочитаемое название: "2026-09-19 18:00 | DLW M | TV Baden – VV Humann Essen II"
+  const when = meta.kickoff
+    ? new Date(meta.kickoff).toLocaleString('sv-SE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' })
+    : '';
+  return [when, meta.leagueShort || meta.league || '', `${meta.team1Name || '?'} – ${meta.team2Name || '?'}`]
+    .filter(Boolean)
+    .join(' | ');
+}
+
+const indexedThisRun = new Set();
+async function writeMatchIndex(matchUuid, meta) {
+  if (indexedThisRun.has(matchUuid) || !meta || !meta.team1Name) return;
+  // match_index/{uuid} = "дата | лига | команда1 – команда2" — чтобы в консоли Firebase было видно, что за матч
+  await axios.put(`${FIREBASE_BASE_URL}/match_index/${matchUuid}.json`, JSON.stringify(matchTitle(meta)), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  indexedThisRun.add(matchUuid);
+}
+
 async function archiveFinishedMatch(state, matchUuid, meta, label) {
   // 1) сырой state целиком (включая eventHistory) — из него можно пересчитать что угодно позже
   await axios.put(`${FIREBASE_BASE_URL}/archive/${matchUuid}.json`, {
@@ -291,14 +311,17 @@ async function archiveFinishedMatch(state, matchUuid, meta, label) {
 }
 
 async function syncOneMatch(feedData, watch) {
-  const { matchUuid, label } = watch;
+  const { matchUuid } = watch;
+  let label = watch.label || matchUuid;
   const payload = computeMatchPayload(feedData, watch);
   if (!payload) {
     console.log(`[${label}] матч не найден в фиде (ещё не начался или уже выпал из окна)`);
     return null;
   }
 
+  if (label === matchUuid && payload.meta.team1Name) label = `${payload.meta.team1Name} - ${payload.meta.team2Name}`;
   await axios.put(`${FIREBASE_BASE_URL}/dvv_live/${matchUuid}.json`, payload);
+  await writeMatchIndex(matchUuid, payload.meta).catch(e => console.warn(`[${label}] не удалось записать match_index: ${e.message}`));
 
   // Матч завершён -> один раз сохраняем сырой state и считаем статистику,
   // пока матч не выпал из ~8-дневного окна фида DVV.
