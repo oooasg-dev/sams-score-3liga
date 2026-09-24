@@ -110,6 +110,35 @@ function buildRoster(teamSquadEvent) {
   };
 }
 
+function findTeamInfo(league, teamId) {
+  // Логотипы лежат в matchSeries[лига].teams[] (поле logoImage200);
+  // запасной вариант — таблица рейтинга той же лиги.
+  if (!league || !teamId) return {};
+  const fromTeams = (league.teams || []).find(t => t.id === teamId);
+  if (fromTeams) return fromTeams;
+  const ranks = (league.rankings && league.rankings.fullRankings) || [];
+  const fromRank = ranks.find(r => r.team && r.team.id === teamId);
+  return fromRank ? fromRank.team : {};
+}
+
+function personName(p) {
+  return p ? `${p.firstName || ''} ${p.lastName || ''}`.trim() : '';
+}
+
+function buildReferees(eventHistory) {
+  // Судьи и секретари — из события CONFIRM_ARBITRATION (берём последнее).
+  const ev = (eventHistory || [])
+    .filter(e => e.type === 'CONFIRM_ARBITRATION' && e.arbitration)
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  const a = (ev && ev.arbitration) || {};
+  return {
+    referee1: personName(a.firstReferee),
+    referee2: personName(a.secondReferee),
+    scorer: personName(a.scorer),
+    scorerAssistant: personName(a.scorerAssistant),
+  };
+}
+
 function buildPlayerIndex(roster1, roster2) {
   const idx = {};
   [roster1, roster2].forEach(r => {
@@ -179,10 +208,19 @@ function computeMatchPayload(feedData, watch) {
     for (const m of day.matches || []) {
       if (m.id === matchUuid) {
         const league = feedData.matchSeries && feedData.matchSeries[m.matchSeries];
+        const info1 = findTeamInfo(league, m.team1);
+        const info2 = findTeamInfo(league, m.team2);
         meta = {
           team1Name: m.teamDescription1,
           team2Name: m.teamDescription2,
+          team1Id: m.team1 || '',
+          team2Id: m.team2 || '',
+          team1Logo: info1.logoImage200 || '',
+          team2Logo: info2.logoImage200 || '',
+          team1Short: info1.shortName || '',
+          team2Short: info2.shortName || '',
           league: league ? league.name : m.matchSeries,
+          leagueShort: league ? league.shortName || '' : '',
           kickoff: m.date,
         };
         break outer;
@@ -211,6 +249,7 @@ function computeMatchPayload(feedData, watch) {
   const payload = {
     meta: { ...meta, syncedAt: new Date().toISOString() },
     roster: { team1: roster1, team2: roster2 },
+    referees: buildReferees(state.eventHistory),
     live: {
       started: !!state.started,
       finished: !!state.finished,
