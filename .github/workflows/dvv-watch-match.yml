@@ -11,14 +11,14 @@ on:
         required: false
         default: '15'
       max_runtime_minutes:
-        description: 'Максимальное время работы job, минут (страховка)'
+        description: 'Страховка: максимум минут работы (не больше 350, лимит GitHub — 6 часов)'
         required: false
         default: '240'
 
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 260
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
 
