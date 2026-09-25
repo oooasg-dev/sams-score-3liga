@@ -173,7 +173,11 @@ function computeTimeouts(eventHistory, currentSetNumber) {
   return {
     team1Left: Math.max(0, MAX_TIMEOUTS_PER_SET - used.team1),
     team2Left: Math.max(0, MAX_TIMEOUTS_PER_SET - used.team2),
+    team1Used: used.team1,
+    team2Used: used.team2,
     activeTeam: active ? lastEvent.teamCode : null,
+    // Номер тайм-аута активной команды в этом сете (1 или 2) — для титра "1-й тайм-аут" / "2-й тайм-аут"
+    activeTeamTimeoutNumber: active ? used[lastEvent.teamCode] : null,
   };
 }
 
@@ -185,6 +189,7 @@ function computeSubstitutions(eventHistory, currentSetNumber, playerIndex) {
     .map(e => ({
       teamCode: e.teamCode,
       timestamp: e.timestamp,
+      setScore: e.setScore || { team1: 0, team2: 0 },
       playerInUuid: e.playerInUuid || (e.substitution && e.substitution.playerInUuid) || null,
       playerOutUuid: e.playerOutUuid || (e.substitution && e.substitution.playerOutUuid) || null,
       playerIn: playerIndex[e.playerInUuid] || null,
@@ -194,6 +199,32 @@ function computeSubstitutions(eventHistory, currentSetNumber, playerIndex) {
   // события SUBSTITUTION нужно свериться на реальном событии живого
   // матча — раньше нам попадались только SUBSTITUTION без разбора
   // структуры целиком. Если имена полей другие — поправить здесь.
+}
+
+function scoreKey(s) {
+  return `${s.team1}:${s.team2}`;
+}
+
+function groupSubstitutionMoments(substitutions) {
+  // Группирует замены, случившиеся при одном и том же счёте, в один "момент":
+  // это покрывает и двойную замену одной команды, и одновременные замены
+  // у обеих команд. Для титров: показываем последний момент целиком.
+  const byKey = new Map();
+  for (const sub of substitutions) {
+    const key = scoreKey(sub.setScore || { team1: 0, team2: 0 });
+    if (!byKey.has(key)) {
+      byKey.set(key, { setScore: sub.setScore, timestamp: sub.timestamp, byTeam: { team1: [], team2: [] } });
+    }
+    const moment = byKey.get(key);
+    moment.timestamp = Math.max(moment.timestamp, sub.timestamp);
+    moment.byTeam[sub.teamCode].push({
+      playerInUuid: sub.playerInUuid,
+      playerOutUuid: sub.playerOutUuid,
+      playerIn: sub.playerIn,
+      playerOut: sub.playerOut,
+    });
+  }
+  return [...byKey.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function computeMatchPayload(feedData, watch) {
@@ -245,6 +276,24 @@ function computeMatchPayload(feedData, watch) {
 
   const timeouts = computeTimeouts(state.eventHistory, currentSetEntry.setNumber);
   const substitutions = computeSubstitutions(state.eventHistory, currentSetEntry.setNumber, playerIndex);
+  const substitutionMoments = groupSubstitutionMoments(substitutions);
+
+  // Либеро на площадке прямо сейчас: пересечение заявленных либеро (roster.liberos)
+  // с текущей шестёркой (teamLineups). Если в заявке два либеро — берём того,
+  // кто сейчас реально на площадке (может быть и null, если оба на лавке).
+  const liberoOnCourt = (roster, lineupUuids) => {
+    const uuids = new Set(lineupUuids || []);
+    return (roster?.liberos || []).find(l => uuids.has(l.uuid)) || null;
+  };
+  const libero1 = liberoOnCourt(roster1, state.teamLineups?.team1?.playerUuids);
+  const libero2 = liberoOnCourt(roster2, state.teamLineups?.team2?.playerUuids);
+
+  // ВНИМАНИЕ, НЕ ПОДТВЕРЖДЕНО: предполагаем, что playerUuids[0] — подающий
+  // (позиция 1 / зона подачи). Ротация массива подтверждена на живых данных,
+  // но какой именно индекс соответствует зоне подачи — нет. Проверить на
+  // ближайшем живом матче и поправить при необходимости (см. README ниже).
+  const servingLineup = state.serving === 'team2' ? lineup2 : lineup1;
+  const servingPlayer = servingLineup[0] || null;
 
   const payload = {
     meta: { ...meta, syncedAt: new Date().toISOString() },
@@ -259,10 +308,13 @@ function computeMatchPayload(feedData, watch) {
       finishedSets: finishedSets.map(s => ({ setNumber: s.setNumber, ...s.setScore })),
       servingTeam: state.serving || null,
       lineup: { team1: lineup1, team2: lineup2 },
+      libero: { team1: libero1, team2: libero2 },
+      servingPlayer, // best-effort, см. комментарий выше — не подтверждено
       bench: { team1: bench1, team2: bench2 },
       timeouts,
     },
     substitutions,
+    substitutionMoments,
   };
 
   return payload;
@@ -398,4 +450,9 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { syncOneMatch, computeMatchPayload, computeTimeouts, computeSubstitutions, buildRoster, findLatestTeamSquadEvent };
+module.exports = {
+  syncOneMatch, computeMatchPayload, computeTimeouts, computeSubstitutions,
+  buildRoster, findLatestTeamSquadEvent, findTeamInfo, buildReferees,
+  buildPlayerIndex, archiveFinishedMatch, matchTitle, writeMatchIndex, groupSubstitutionMoments,
+  TICKER_URL, FIREBASE_BASE_URL, loadWatchlist,
+};
