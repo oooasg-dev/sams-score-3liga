@@ -1,0 +1,46 @@
+name: DVV — Слушать матч(и) live (WebSocket)
+
+on:
+  workflow_dispatch:
+    inputs:
+      match_uuid:
+        description: 'matchUuid — один или несколько через запятую'
+        required: true
+      league:
+        description: 'Лига: dvv или nwvv'
+        required: false
+        default: 'dvv'
+      max_runtime_minutes:
+        description: 'Страховка: максимум минут работы (не больше 350, лимит GitHub — 6 часов)'
+        required: false
+        default: '340'
+
+jobs:
+  listen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install
+
+      - name: Создать watchlist из входных параметров
+        env:
+          UUIDS: ${{ github.event.inputs.match_uuid }}
+        run: |
+          node -e "
+          const list = process.env.UUIDS.split(',').map(s => s.trim()).filter(Boolean).map(u => ({ matchUuid: u }));
+          require('fs').writeFileSync('dvv_watchlist.json', JSON.stringify(list));
+          console.log('Матчей в списке:', list.length);
+          "
+          cat dvv_watchlist.json
+
+      - name: Запустить WS-слушатель
+        env:
+          DVV_LEAGUE: ${{ github.event.inputs.league }}
+          DVV_MAX_RUNTIME_MIN: ${{ github.event.inputs.max_runtime_minutes }}
+        run: node dvv_ws_listener.js
