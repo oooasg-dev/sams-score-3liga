@@ -295,6 +295,12 @@ function computeMatchPayload(feedData, watch) {
   const servingLineup = state.serving === 'team2' ? lineup2 : lineup1;
   const servingPlayer = servingLineup[0] || null;
 
+  // Самое свежее событие целиком, как пришло от SAMS, без обработки.
+  // Нужно для типов событий, которые мост пока не разбирает отдельно
+  // (SET_BALL, MATCH_BALL, CANCEL_TIMEOUT, SELECT_MVP и т.д.) — титры
+  // могут заглянуть сюда, даже если для события ещё нет своего поля.
+  const lastEvent = (state.eventHistory || [])[0] || null;
+
   const payload = {
     meta: { ...meta, syncedAt: new Date().toISOString() },
     roster: { team1: roster1, team2: roster2 },
@@ -312,6 +318,7 @@ function computeMatchPayload(feedData, watch) {
       servingPlayer, // best-effort, см. комментарий выше — не подтверждено
       bench: { team1: bench1, team2: bench2 },
       timeouts,
+      lastEvent, // сырое событие целиком: type, teamCode, timestamp, setScore и т.д.
     },
     substitutions,
     substitutionMoments,
