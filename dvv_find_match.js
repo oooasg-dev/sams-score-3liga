@@ -14,7 +14,8 @@
 
 const axios = require('axios');
 
-const TICKER_URL = 'https://backend.sams-ticker.de/live/indoor/tickers/dvv';
+const LEAGUE = process.env.DVV_LEAGUE || 'dvv';
+const TICKER_URL = `https://backend.sams-ticker.de/live/indoor/tickers/${LEAGUE}`;
 
 function norm(s) {
   return (s || '').toLowerCase();
