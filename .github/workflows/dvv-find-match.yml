@@ -6,8 +6,12 @@ name: DVV — Найти матч
 on:
   workflow_dispatch:
     inputs:
+      league:
+        description: 'Лига: dvv или nwvv'
+        required: false
+        default: 'dvv'
       team1:
-        description: 'Название команды (как на сайте DVV)'
+        description: 'Название команды (как на сайте)'
         required: true
       team2:
         description: 'Вторая команда (необязательно, чтобы сузить поиск)'
@@ -23,4 +27,6 @@ jobs:
         with:
           node-version: '20'
       - run: npm install
-      - run: node dvv_find_match.js "${{ github.event.inputs.team1 }}" "${{ github.event.inputs.team2 }}"
+      - env:
+          DVV_LEAGUE: ${{ github.event.inputs.league }}
+        run: node dvv_find_match.js "${{ github.event.inputs.team1 }}" "${{ github.event.inputs.team2 }}"
