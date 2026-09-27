@@ -34,7 +34,14 @@ async function getJson(path) {
 }
 
 async function putJson(path, value) {
-  await axios.put(`${FIREBASE_BASE_URL}/${path}.json`, value, { timeout: 30000 });
+  try {
+    await axios.put(`${FIREBASE_BASE_URL}/${path}.json`, value, { timeout: 30000 });
+    return true;
+  } catch (e) {
+    const detail = e.response ? `${e.response.status} ${JSON.stringify(e.response.data)}` : e.message;
+    console.error(`    ОШИБКА записи ${path}: ${detail}`);
+    return false;
+  }
 }
 
 async function main() {
@@ -57,31 +64,52 @@ async function main() {
 
   console.log(`Найдено матчей во всех старых ветках: ${allUuids.size}`);
 
+  const failed = [];
+
   for (const uuid of allUuids) {
     console.log(`\n[${uuid}]`);
-    const title = matchIndex?.[uuid];
-    const live = dvvLive?.[uuid];
-    const raw = archive?.[uuid];
-    const stats = matchStats?.[uuid];
-    const history = matchHistory?.[uuid];
+    try {
+      const title = matchIndex?.[uuid];
+      const live = dvvLive?.[uuid];
+      const raw = archive?.[uuid];
+      const stats = matchStats?.[uuid];
+      const history = matchHistory?.[uuid];
 
-    if (title) { await putJson(`matches/${uuid}/title`, title); console.log('  title перенесён'); }
-    if (live) { await putJson(`matches/${uuid}/live`, live); console.log('  live перенесён'); }
-    if (raw) { await putJson(`matches/${uuid}/raw`, raw); console.log('  raw перенесён'); }
-    if (stats) { await putJson(`matches/${uuid}/stats`, stats); console.log('  stats перенесён'); }
+      let ok = true;
+      if (title !== undefined) ok = (await putJson(`matches/${uuid}/title`, title)) && ok;
+      if (live) ok = (await putJson(`matches/${uuid}/live`, live)) && ok;
+      if (raw) ok = (await putJson(`matches/${uuid}/raw`, raw)) && ok;
+      if (stats) ok = (await putJson(`matches/${uuid}/stats`, stats)) && ok;
 
-    if (history) {
-      const existing = await getJson(`matches/${uuid}/history`);
-      if (existing) {
-        console.log('  history: в matches/ уже что-то есть — пропускаю, чтобы не задвоить');
-      } else {
-        await putJson(`matches/${uuid}/history`, history);
-        console.log(`  history перенесена (${Object.keys(history).length} слепков)`);
+      if (history) {
+        const existing = await getJson(`matches/${uuid}/history`);
+        if (existing) {
+          console.log('  history: в matches/ уже что-то есть — пропускаю, чтобы не задвоить');
+        } else {
+          const historyOk = await putJson(`matches/${uuid}/history`, history);
+          ok = historyOk && ok;
+          if (historyOk) console.log(`  history перенесена (${Object.keys(history).length} слепков)`);
+        }
       }
+
+      if (ok) {
+        console.log('  готово');
+      } else {
+        failed.push(uuid);
+      }
+    } catch (e) {
+      console.error(`  НЕОЖИДАННАЯ ОШИБКА по этому матчу: ${e.message} — иду дальше`);
+      failed.push(uuid);
     }
   }
 
   console.log('\n=== Готово. Проверьте matches/ в консоли Firebase. ===');
+  if (failed.length) {
+    console.log(`С проблемами (см. подробности выше по каждому): ${failed.length} из ${allUuids.size}`);
+    failed.forEach(u => console.log(`  - ${u}`));
+  } else {
+    console.log('Все матчи перенесены без ошибок.');
+  }
   console.log('Старые ветки (dvv_live, archive, match_stats, match_history, match_index)');
   console.log('можно удалить вручную, когда убедитесь, что всё перенеслось верно.');
 }
