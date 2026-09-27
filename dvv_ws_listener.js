@@ -90,6 +90,21 @@ async function main() {
     latestState[uuid] = bootstrapFeed.matchStates?.[uuid] || null;
   }
 
+  // ---------- начальная запись из REST, чтобы не ждать первого WS-события ----------
+  // WebSocket пересылает только НОВЫЕ события, случившиеся после подключения.
+  // Если заявка/судьи уже подтверждены секретарём до старта листенера, WS о них
+  // не расскажет, пока не случится что-то ещё. Поэтому сразу пишем то, что уже
+  // есть в REST — а дальше событиями из WS данные будут только дополняться.
+  for (const [uuid, state] of Object.entries(latestState)) {
+    if (!state) continue;
+    try {
+      await handleUpdate(uuid, state);
+      console.log(`[${watchByUuid.get(uuid).label}] стартовый снимок из REST записан`);
+    } catch (e) {
+      console.error(`[${watchByUuid.get(uuid).label}] не удалось записать стартовый снимок:`, e.message);
+    }
+  }
+
   // Предыдущая шестёрка на площадке — для слепков и отладки замен.
   const prevOnCourt = {}; // matchUuid -> {team1: Set, team2: Set}
   const archived = new Set();
