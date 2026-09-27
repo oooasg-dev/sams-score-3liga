@@ -1,0 +1,25 @@
+name: DVV — Разовый перенос в новую схему (matches/)
+
+# Разовая задача: переносит данные из старых веток (dvv_live, archive,
+# match_stats, match_history, match_index) в новую единую схему
+# matches/{matchUuid}/{title, live, raw, stats, history}.
+# Ничего не удаляет из старых веток — только копирует. Можно запускать
+# несколько раз без вреда (см. комментарии в migrate_to_matches_schema.js).
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install
+
+      - name: Перенести данные в matches/
+        run: node migrate_to_matches_schema.js
