@@ -23,14 +23,13 @@
  *    computeMatchPayload). Проверить на первом же реальном матче: у кого
  *    из шестёрки табло показывает подачу, и совпадает ли это с [0].
  *
- * Что пишется в Firebase (то же дерево, что у dvv_bridge.js):
- *   dvv_live/{matchUuid}        — как и раньше, читают титры, без изменений
- *   match_index/{matchUuid}     — человекочитаемое название матча
- *   match_history/{matchUuid}/* — НОВОЕ: слепок на каждое сообщение,
- *                                  append-only (счёт, сет, подача,
- *                                  шестёрки на площадке, тип события)
- *   archive/{matchUuid}         — сырой state при finished:true (1 раз)
- *   match_stats/{matchUuid}     — статистика розыгрышей при finished:true
+ * Что пишется в Firebase (единая схема matches/, как после migrate_to_matches_schema):
+ *   matches/{matchUuid}/live    — текущее состояние матча (бывший dvv_live)
+ *   matches/{matchUuid}/history — слепок на каждое сообщение, append-only
+ *   matches/{matchUuid}/raw     — сырой state при finished:true (бывший archive)
+ *   matches/{matchUuid}/stats   — статистика розыгрышей при finished:true
+ *   program/live                — ДУБЛЬ live матча "в эфире" для титров vMix
+ *   program/matchUuid           — указатель, какой матч сейчас в эфире
  *
  * Список матчей — тот же dvv_watchlist.json, что у dvv_bridge.js, либо
  * аргумент командной строки (uuid через запятую).
@@ -65,6 +64,30 @@ function loadWatchlist() {
 async function main() {
   const watchlist = loadWatchlist();
   const watchByUuid = new Map(watchlist.map(w => [w.matchUuid, w]));
+
+  // Матч "в эфире": uuid лежит в Firebase по адресу program/matchUuid (его ставит
+  // страница выбора матча). Его live дублируется в постоянную ветку program/live,
+  // откуда читают титры vMix — адрес для титров не меняется никогда.
+  let programUuid = null;
+  const lastOut = {}; // matchUuid -> последний собранный payload (для мгновенной записи при смене эфира)
+  async function refreshProgramUuid() {
+    try {
+      const res = await axios.get(`${FIREBASE_BASE_URL}/program/matchUuid.json`, { timeout: 10000 });
+      const next = res.data || null;
+      if (next !== programUuid) {
+        programUuid = next;
+        console.log(`>>> В ЭФИРЕ теперь: ${programUuid || '(ничего)'}`);
+        if (programUuid && !watchByUuid.has(programUuid)) {
+          console.warn('    ВНИМАНИЕ: этот матч не в списке слушателя — program/live обновляться не будет');
+        } else if (programUuid && lastOut[programUuid]) {
+          // сразу отдаём титрам актуальные данные, не дожидаясь следующего розыгрыша
+          await axios.put(`${FIREBASE_BASE_URL}/program/live.json`, lastOut[programUuid]);
+        }
+      }
+    } catch (e) {
+      // сеть моргнула — оставляем прежнее значение
+    }
+  }
   console.log(`=== WS-слушатель (${LEAGUE}) запущен, слежу за ${watchlist.length} матч(ами) ===`);
   watchlist.forEach(w => console.log(`  - ${w.label} (${w.matchUuid})`));
 
@@ -132,12 +155,21 @@ async function main() {
       return;
     }
     if (!out) return;
+    lastOut[matchUuid] = out;
 
     try {
-      await axios.put(`${FIREBASE_BASE_URL}/dvv_live/${matchUuid}.json`, out);
-      await bridge.writeMatchIndex(matchUuid, out.meta).catch(() => {});
+      await axios.put(`${FIREBASE_BASE_URL}/matches/${matchUuid}/live.json`, out);
     } catch (e) {
-      console.error(`[${watch.label}] не удалось записать dvv_live:`, e.message);
+      console.error(`[${watch.label}] не удалось записать matches/live:`, e.message);
+    }
+
+    // дублируем в постоянную ветку для титров, если это матч "в эфире"
+    if (matchUuid === programUuid) {
+      try {
+        await axios.put(`${FIREBASE_BASE_URL}/program/live.json`, out);
+      } catch (e) {
+        console.error(`[${watch.label}] не удалось записать program/live:`, e.message);
+      }
     }
 
     // ---------- слепок в match_history (append, не перезаписывается) ----------
@@ -154,9 +186,9 @@ async function main() {
         },
         eventType: lastEvent ? lastEvent.type : null,
       };
-      await axios.post(`${FIREBASE_BASE_URL}/match_history/${matchUuid}.json`, snapshot);
+      await axios.post(`${FIREBASE_BASE_URL}/matches/${matchUuid}/history.json`, snapshot);
     } catch (e) {
-      console.error(`[${watch.label}] не удалось записать слепок в match_history:`, e.message);
+      console.error(`[${watch.label}] не удалось записать слепок в matches/history:`, e.message);
     }
 
     const live = out.live;
@@ -215,19 +247,33 @@ async function main() {
 
   connect();
 
+  // Если при запуске указан матч "в эфир" — ставим его указателем.
+  const initialProgram = (process.env.DVV_PROGRAM_UUID || '').trim();
+  if (initialProgram) {
+    try {
+      await axios.put(`${FIREBASE_BASE_URL}/program/matchUuid.json`, JSON.stringify(initialProgram));
+    } catch (e) {
+      console.error('Не удалось записать program/matchUuid:', e.message);
+    }
+  }
+
+  // Раз в 5 сек проверяем, какой матч выбран "в эфир".
+  await refreshProgramUuid();
+  const programTimer = setInterval(refreshProgramUuid, 5000);
+
   // Периодически проверяем, не пора ли остановиться.
   const checkInterval = setInterval(() => {
     if (allDone()) {
       console.log('=== Все отслеживаемые матчи завершены — останавливаюсь ===');
       stopped = true;
-      clearInterval(checkInterval);
+      clearInterval(checkInterval); clearInterval(programTimer);
       if (ws) ws.close();
       process.exit(0);
     }
     if (Date.now() - startedAt > MAX_RUNTIME_MIN * 60 * 1000) {
       console.log('=== Достигнут лимит времени работы — останавливаюсь ===');
       stopped = true;
-      clearInterval(checkInterval);
+      clearInterval(checkInterval); clearInterval(programTimer);
       if (ws) ws.close();
       process.exit(0);
     }
