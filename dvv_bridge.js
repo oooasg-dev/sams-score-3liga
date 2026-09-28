@@ -288,6 +288,30 @@ function computeMatchPayload(feedData, watch) {
   const libero1 = liberoOnCourt(roster1, state.teamLineups?.team1?.playerUuids);
   const libero2 = liberoOnCourt(roster2, state.teamLineups?.team2?.playerUuids);
 
+  // Стартовая шестёрка текущего (последнего начатого) сета — как её объявляют на
+  // сайте DVV: по событию START_MATCH (сет 1) или START_SET (сеты 2+). В отличие
+  // от lineup, не меняется от ротации и замен. Порядок = позиции 1–6.
+  // Либеро в самом событии нет: если в заявке ровно один либеро — берём его,
+  // иначе — того, кто сейчас на площадке (или null).
+  const startEvent = (state.eventHistory || [])
+    .filter(e => (e.type === 'START_MATCH' || e.type === 'START_SET') && e.lineups)
+    .sort((a, b) => b.timestamp - a.timestamp)[0] || null;
+  let startLineup = null;
+  if (startEvent) {
+    const pick = uuids => (uuids || []).map(u => playerIndex[u] || { uuid: u });
+    const startLibero = (roster, currentLibero) =>
+      (roster?.liberos?.length === 1 ? roster.liberos[0] : currentLibero) || null;
+    startLineup = {
+      setNumber: startEvent.setNumber || 1,
+      team1: pick(startEvent.lineups.team1?.playerUuids),
+      team2: pick(startEvent.lineups.team2?.playerUuids),
+      libero: {
+        team1: startLibero(roster1, libero1),
+        team2: startLibero(roster2, libero2),
+      },
+    };
+  }
+
   // ВНИМАНИЕ, НЕ ПОДТВЕРЖДЕНО: предполагаем, что playerUuids[0] — подающий
   // (позиция 1 / зона подачи). Ротация массива подтверждена на живых данных,
   // но какой именно индекс соответствует зоне подачи — нет. Проверить на
@@ -314,6 +338,7 @@ function computeMatchPayload(feedData, watch) {
       finishedSets: finishedSets.map(s => ({ setNumber: s.setNumber, ...s.setScore })),
       servingTeam: state.serving || null,
       lineup: { team1: lineup1, team2: lineup2 },
+      startLineup, // стартовая шестёрка сета (для титров), null до START_MATCH
       libero: { team1: libero1, team2: libero2 },
       servingPlayer, // best-effort, см. комментарий выше — не подтверждено
       bench: { team1: bench1, team2: bench2 },
