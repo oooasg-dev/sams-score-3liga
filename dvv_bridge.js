@@ -341,7 +341,7 @@ const indexedThisRun = new Set();
 async function writeMatchIndex(matchUuid, meta) {
   if (indexedThisRun.has(matchUuid) || !meta || !meta.team1Name) return;
   // match_index/{uuid} = "дата | лига | команда1 – команда2" — чтобы в консоли Firebase было видно, что за матч
-  await axios.put(`${FIREBASE_BASE_URL}/match_index/${matchUuid}.json`, JSON.stringify(matchTitle(meta)), {
+  await axios.put(`${FIREBASE_BASE_URL}/matches/${matchUuid}/title.json`, JSON.stringify(matchTitle(meta)), {
     headers: { 'Content-Type': 'application/json' },
   });
   indexedThisRun.add(matchUuid);
@@ -349,7 +349,7 @@ async function writeMatchIndex(matchUuid, meta) {
 
 async function archiveFinishedMatch(state, matchUuid, meta, label) {
   // 1) сырой state целиком (включая eventHistory) — из него можно пересчитать что угодно позже
-  await axios.put(`${FIREBASE_BASE_URL}/archive/${matchUuid}.json`, {
+  await axios.put(`${FIREBASE_BASE_URL}/matches/${matchUuid}/raw.json`, {
     archivedAt: new Date().toISOString(),
     meta,
     state,
@@ -357,13 +357,13 @@ async function archiveFinishedMatch(state, matchUuid, meta, label) {
 
   // 2) статистика розыгрышей
   const stats = computeRallyStats(state);
-  await axios.put(`${FIREBASE_BASE_URL}/match_stats/${matchUuid}.json`, {
+  await axios.put(`${FIREBASE_BASE_URL}/matches/${matchUuid}/stats.json`, {
     computedAt: new Date().toISOString(),
     meta,
     ...stats,
   });
 
-  console.log(`[${label}] АРХИВ сохранён: archive/${matchUuid}, match_stats/${matchUuid}`);
+  console.log(`[${label}] АРХИВ сохранён: matches/${matchUuid}/raw, matches/${matchUuid}/stats`);
   if (stats.warnings.length) {
     stats.warnings.forEach(w => console.warn(`[${label}] предупреждение статистики: ${w}`));
   }
@@ -379,8 +379,7 @@ async function syncOneMatch(feedData, watch) {
   }
 
   if (label === matchUuid && payload.meta.team1Name) label = `${payload.meta.team1Name} - ${payload.meta.team2Name}`;
-  await axios.put(`${FIREBASE_BASE_URL}/dvv_live/${matchUuid}.json`, payload);
-  await writeMatchIndex(matchUuid, payload.meta).catch(e => console.warn(`[${label}] не удалось записать match_index: ${e.message}`));
+  await axios.put(`${FIREBASE_BASE_URL}/matches/${matchUuid}/live.json`, payload);
 
   // Матч завершён -> один раз сохраняем сырой state и считаем статистику,
   // пока матч не выпал из ~8-дневного окна фида DVV.
