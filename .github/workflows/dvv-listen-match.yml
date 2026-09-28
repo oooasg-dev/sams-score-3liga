@@ -10,6 +10,10 @@ on:
         description: 'Лига: dvv или nwvv'
         required: false
         default: 'dvv'
+      program_uuid:
+        description: 'matchUuid матча, который идёт в эфир (program/live). Пусто — не менять'
+        required: false
+        default: ''
       max_runtime_minutes:
         description: 'Страховка: максимум минут работы (не больше 350, лимит GitHub — 6 часов)'
         required: false
@@ -42,5 +46,6 @@ jobs:
       - name: Запустить WS-слушатель
         env:
           DVV_LEAGUE: ${{ github.event.inputs.league }}
+          DVV_PROGRAM_UUID: ${{ github.event.inputs.program_uuid }}
           DVV_MAX_RUNTIME_MIN: ${{ github.event.inputs.max_runtime_minutes }}
         run: node dvv_ws_listener.js
