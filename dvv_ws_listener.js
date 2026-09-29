@@ -68,6 +68,7 @@ async function main() {
   // Матч "в эфире": uuid лежит в Firebase по адресу program/matchUuid (его ставит
   // страница выбора матча). Его live дублируется в постоянную ветку program/live,
   // откуда читают титры vMix — адрес для титров не меняется никогда.
+  const archived = new Set(); // объявлено выше стартового снимка, чтобы handleUpdate мог им пользоваться сразу
   let programUuid = null;
   const lastOut = {}; // matchUuid -> последний собранный payload (для мгновенной записи при смене эфира)
   async function refreshProgramUuid() {
@@ -130,7 +131,6 @@ async function main() {
 
   // Предыдущая шестёрка на площадке — для слепков и отладки замен.
   const prevOnCourt = {}; // matchUuid -> {team1: Set, team2: Set}
-  const archived = new Set();
   const startedAt = Date.now();
   let ws;
   let stopped = false;
