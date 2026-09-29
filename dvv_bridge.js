@@ -303,6 +303,7 @@ function computeMatchPayload(feedData, watch) {
       (roster?.liberos?.length === 1 ? roster.liberos[0] : currentLibero) || null;
     startLineup = {
       setNumber: startEvent.setNumber || 1,
+      startedAt: startEvent.timestamp || null, // когда секретарь начал сет (для сигнала «состав обновился»)
       team1: pick(startEvent.lineups.team1?.playerUuids),
       team2: pick(startEvent.lineups.team2?.playerUuids),
       libero: {
