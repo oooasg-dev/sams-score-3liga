@@ -107,6 +107,15 @@ async function main() {
     bootstrapFeed = { matchDays: [], matchSeries: {}, matchStates: {} };
   }
 
+  // Предупреждение, если матча нет в ленте: неверный uuid, не та лига (dvv / nwvv) или матч ещё не создан.
+  for (const [uuid, w] of watchByUuid) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid)) {
+      console.warn(`!!! [${w.label}] это не похоже на uuid матча — проверь, что в поле нет лишнего текста`);
+    } else if (!bootstrapFeed.matchStates?.[uuid]) {
+      console.warn(`!!! [${w.label}] в ленте ${LEAGUE} нет состояния этого матча (неверный uuid, не та лига или матч ещё не начался)`);
+    }
+  }
+
   // Живое состояние каждого матча (payload из последнего WS-сообщения).
   // Изначально — то, что уже есть в REST (может быть, матч ещё не начался).
   const latestState = {};
@@ -248,7 +257,8 @@ async function main() {
   connect();
 
   // Если при запуске указан матч "в эфир" — ставим его указателем.
-  const initialProgram = (process.env.DVV_PROGRAM_UUID || '').trim();
+  // из введённого текста берём только сам uuid (на случай, если вставили вместе с подписью "matchUuid: ")
+  const initialProgram = ((process.env.DVV_PROGRAM_UUID || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i) || [''])[0].toLowerCase();
   if (initialProgram) {
     try {
       await axios.put(`${FIREBASE_BASE_URL}/program/matchUuid.json`, JSON.stringify(initialProgram));
