@@ -37,7 +37,7 @@ jobs:
           UUIDS: ${{ github.event.inputs.match_uuid }}
         run: |
           node -e "
-          const list = process.env.UUIDS.split(',').map(s => s.trim()).filter(Boolean).map(u => ({ matchUuid: u }));
+          const re = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi; const list = (process.env.UUIDS.match(re) || []).map(u => ({ matchUuid: u.toLowerCase() })); if (!list.length) { console.error('В поле match_uuid нет ни одного uuid'); process.exit(1); }
           require('fs').writeFileSync('dvv_watchlist.json', JSON.stringify(list));
           console.log('Матчей в списке:', list.length);
           "
