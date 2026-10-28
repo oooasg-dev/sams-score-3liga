@@ -68,5 +68,16 @@ async function main() {
 
 main().catch(err => {
   console.error('Ошибка:', err.message);
+  // Диагностика: что именно ответил сервер (нужно, чтобы понять причину 403)
+  if (err.response) {
+    console.error('Status:', err.response.status);
+    console.error('Headers:', JSON.stringify(err.response.headers, null, 2));
+    const body = typeof err.response.data === 'string'
+      ? err.response.data
+      : JSON.stringify(err.response.data);
+    console.error('Body:', String(body).slice(0, 500));
+  } else if (err.code) {
+    console.error('Код ошибки:', err.code);
+  }
   process.exit(1);
 });
