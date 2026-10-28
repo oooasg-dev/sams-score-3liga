@@ -28,13 +28,37 @@ async function main() {
     process.exit(1);
   }
 
-  const { data } = await axios.get(TICKER_URL, {
+  console.log('URL:', TICKER_URL);
+  console.log('Ищем:', args.join(' + '));
+
+  const { data, status, headers } = await axios.get(TICKER_URL, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
     timeout: 30000,
   });
 
+  // --- Диагностика ---
+  const days = (data && data.matchDays) || [];
+  const totalMatches = days.reduce((n, d) => n + ((d.matches || []).length), 0);
+  console.log('HTTP status:', status);
+  console.log('Content-Type:', headers && headers['content-type']);
+  console.log('Ключи ответа:', Object.keys(data || {}));
+  console.log('Игровых дней:', days.length);
+  console.log('Всего матчей:', totalMatches);
+  if (days.length > 0) {
+    const firstDate = days[0].matches && days[0].matches[0] && days[0].matches[0].date;
+    const lastDay = days[days.length - 1];
+    const lastDate = lastDay.matches && lastDay.matches[0] && lastDay.matches[0].date;
+    console.log('Первый день в тикере:', firstDate ? new Date(firstDate).toLocaleString('de-DE') : '?');
+    console.log('Последний день в тикере:', lastDate ? new Date(lastDate).toLocaleString('de-DE') : '?');
+  }
+  if (totalMatches === 0) {
+    console.log('Начало ответа:', JSON.stringify(data).slice(0, 500));
+  }
+  console.log('');
+  // --- Конец диагностики ---
+
   const results = [];
-  for (const day of data.matchDays || []) {
+  for (const day of days) {
     for (const m of day.matches || []) {
       const t1 = norm(m.teamDescription1);
       const t2 = norm(m.teamDescription2);
@@ -43,6 +67,7 @@ async function main() {
         const league = (data.matchSeries && data.matchSeries[m.matchSeries]) || {};
         results.push({
           id: m.id,
+          ts: new Date(m.date).getTime(),
           date: new Date(m.date).toLocaleString('de-DE'),
           team1: m.teamDescription1,
           team2: m.teamDescription2,
@@ -59,7 +84,7 @@ async function main() {
 
   console.log(`Найдено совпадений: ${results.length}\n`);
   results
-    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .sort((a, b) => a.ts - b.ts)
     .forEach(r => {
       console.log(`${r.date}  |  ${r.team1}  vs  ${r.team2}  |  ${r.league}`);
       console.log(`  matchUuid: ${r.id}\n`);
@@ -68,5 +93,11 @@ async function main() {
 
 main().catch(err => {
   console.error('Ошибка:', err.message);
+  if (err.response) {
+    console.error('HTTP status:', err.response.status);
+    console.error('Тело ответа:', JSON.stringify(err.response.data).slice(0, 500));
+  } else if (err.code) {
+    console.error('Код ошибки:', err.code);
+  }
   process.exit(1);
 });
