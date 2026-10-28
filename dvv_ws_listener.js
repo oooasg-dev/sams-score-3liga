@@ -98,7 +98,11 @@ async function main() {
   let bootstrapFeed;
   try {
     const res = await axios.get(TICKER_URL, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      headers: {
+        ...bridge.TICKER_HEADERS,
+        'Origin': `https://${LEAGUE}.sams-ticker.de`,
+        'Referer': `https://${LEAGUE}.sams-ticker.de/`,
+      },
       timeout: 30000,
     });
     bootstrapFeed = res.data;
