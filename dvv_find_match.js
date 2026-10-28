@@ -29,7 +29,14 @@ async function main() {
   }
 
   const { data } = await axios.get(TICKER_URL, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    // Заголовки как у самого сайта: без Origin/Referer бэкенд отдаёт 403 (CloudFront)
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36',
+      'Accept': '*/*',
+      'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+      'Origin': `https://${LEAGUE}.sams-ticker.de`,
+      'Referer': `https://${LEAGUE}.sams-ticker.de/`,
+    },
     timeout: 30000,
   });
 
