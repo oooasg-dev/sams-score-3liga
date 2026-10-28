@@ -41,6 +41,15 @@ const axios = require('axios');
 const { computeRallyStats } = require('./compute_rally_stats');
 
 const TICKER_URL = 'https://backend.sams-ticker.de/live/indoor/tickers/dvv';
+// Заголовки как у самого сайта dvv.sams-ticker.de: с 28.10.2026 бэкенд (CloudFront)
+// отдаёт 403 на запросы без Origin/Referer.
+const TICKER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36',
+  'Accept': '*/*',
+  'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+  'Origin': 'https://dvv.sams-ticker.de',
+  'Referer': 'https://dvv.sams-ticker.de/',
+};
 const FIREBASE_BASE_URL = 'https://sams-score-3liga-default-rtdb.europe-west1.firebasedatabase.app';
 const POLL_INTERVAL_MS = Number(
   process.env.DVV_POLL_INTERVAL_MS ||
@@ -426,7 +435,7 @@ async function tick(watchlist) {
   let feedData;
   try {
     const res = await axios.get(TICKER_URL, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      headers: TICKER_HEADERS,
       timeout: 30000,
     });
     feedData = res.data;
@@ -486,5 +495,5 @@ module.exports = {
   syncOneMatch, computeMatchPayload, computeTimeouts, computeSubstitutions,
   buildRoster, findLatestTeamSquadEvent, findTeamInfo, buildReferees,
   buildPlayerIndex, archiveFinishedMatch, matchTitle, writeMatchIndex, groupSubstitutionMoments,
-  TICKER_URL, FIREBASE_BASE_URL, loadWatchlist,
+  TICKER_URL, TICKER_HEADERS, FIREBASE_BASE_URL, loadWatchlist,
 };
