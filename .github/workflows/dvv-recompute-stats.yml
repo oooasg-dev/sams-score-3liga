@@ -1,0 +1,47 @@
+name: DVV — Пересчитать статистику
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Записать результат в Firebase (если выключено — только показать таблицу, ничего не менять)'
+        type: boolean
+        default: false
+      match:
+        description: 'Начало uuid одного матча (пусто = все матчи со снимками площадки)'
+        required: false
+        default: ''
+
+jobs:
+  recompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Пересчёт статистики по снимкам площадки
+        env:
+          WRITE: ${{ inputs.write }}
+          MATCH: ${{ inputs.match }}
+        run: |
+          ARGS=""
+          if [ "$WRITE" = "true" ]; then ARGS="$ARGS --write"; fi
+          if [ -n "$MATCH" ]; then ARGS="$ARGS --match=$MATCH"; fi
+          node recompute_stats_from_history.js $ARGS
+
+      # Старая статистика перед записью сохраняется в файл на раннере; после job он пропадает,
+      # поэтому кладём копию в артефакты запуска (вкладка Summary → Artifacts).
+      - name: Сохранить копию старой статистики
+        if: ${{ always() && inputs.write }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: stats-backup
+          path: stats_backup_*.json
+          if-no-files-found: ignore
