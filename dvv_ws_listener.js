@@ -98,8 +98,7 @@ async function main() {
   // 1) Один раз забираем REST-фид целиком — оттуда берём то, чего нет в
   //    WS-сообщениях: названия команд, логотипы, время начала матча.
   console.log('Загружаю REST-фид один раз для названий команд и логотипов...');
-  let bootstrapFeed;
-  try {
+  async function fetchRestFeed() {
     const res = await axios.get(TICKER_URL, {
       headers: {
         ...bridge.TICKER_HEADERS,
@@ -108,9 +107,26 @@ async function main() {
       },
       timeout: 30000,
     });
-    bootstrapFeed = res.data;
-  } catch (e) {
-    console.error('Не удалось загрузить REST-фид, продолжаю без названий команд:', e.message);
+    return res.data;
+  }
+
+  // Сервер тикера иногда отвечает 403 (CloudFront) с адресов GitHub, причём не всегда:
+  // повторная попытка через несколько секунд часто проходит. Без этого фида в базу
+  // писались бы матчи без названий команд, поэтому пробуем несколько раз.
+  const REST_ATTEMPTS = 5;
+  let bootstrapFeed = null;
+  for (let attempt = 1; attempt <= REST_ATTEMPTS && !bootstrapFeed; attempt++) {
+    try {
+      bootstrapFeed = await fetchRestFeed();
+    } catch (e) {
+      const http = e.response ? ` (HTTP ${e.response.status})` : '';
+      console.error(`Не удалось загрузить REST-фид${http}, попытка ${attempt} из ${REST_ATTEMPTS}: ${e.message}`);
+      if (attempt < REST_ATTEMPTS) await new Promise(r => setTimeout(r, 15000));
+    }
+  }
+  const restLoaded = !!bootstrapFeed;
+  if (!restLoaded) {
+    console.error('!!! REST-фид не загрузился. Продолжаю без названий команд и буду пробовать каждую минуту.');
     bootstrapFeed = { matchDays: [], matchSeries: {}, matchStates: {} };
   }
 
@@ -282,6 +298,26 @@ async function main() {
   }
 
   connect();
+
+  // Если REST-фид при старте не загрузился — докачиваем его в фоне. Как только получилось,
+  // перезаписываем матчи уже с названиями команд, логотипами и временем начала.
+  if (!restLoaded) {
+    const restRetryTimer = setInterval(async () => {
+      try {
+        const fresh = await fetchRestFeed();
+        bootstrapFeed = fresh;
+        clearInterval(restRetryTimer);
+        console.log('REST-фид загружен, обновляю матчи с названиями команд.');
+        for (const uuid of watchByUuid.keys()) {
+          latestState[uuid] = latestState[uuid] || fresh.matchStates?.[uuid] || null;
+          if (latestState[uuid]) await handleUpdate(uuid, latestState[uuid]);
+        }
+      } catch (e) {
+        const http = e.response ? ` (HTTP ${e.response.status})` : '';
+        console.error(`REST-фид всё ещё недоступен${http}: ${e.message}`);
+      }
+    }, 60000);
+  }
 
   // Если при запуске указан матч "в эфир" — ставим его указателем.
   // из введённого текста берём только сам uuid (на случай, если вставили вместе с подписью "matchUuid: ")
