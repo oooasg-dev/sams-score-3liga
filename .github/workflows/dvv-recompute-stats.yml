@@ -22,9 +22,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - run: npm ci
+      # package-lock.json в корне репозитория нет, поэтому без npm ci и без кэша
+      - run: npm install axios ws --no-save --no-audit --no-fund
 
       - name: Пересчёт статистики по снимкам площадки
         env:
