@@ -34,7 +34,7 @@
 
 const { computeRallyStats } = require('./compute_rally_stats');
 
-const FIREBASE_BASE_URL = 'https://sams-score-3liga-default-rtdb.europe-west1.firebasedatabase.app';
+const FIREBASE_BASE_URL = process.env.DVV_FIREBASE_URL || 'https://sams-score-3liga-default-rtdb.europe-west1.firebasedatabase.app';
 const MIN_SET_COVERAGE = 0.85;
 
 const ROLE_CODE = {
@@ -222,15 +222,20 @@ function describeMatch(uuid, live, stats) {
 
 async function loadFromFirebase(matchFilter) {
   const axios = require('axios');
-  const get = async p => {
+  const get = async (p, query = '') => {
     try {
-      return (await axios.get(`${FIREBASE_BASE_URL}/${p}.json`, { timeout: 60000 })).data;
+      // ".json" должен стоять сразу после пути, а параметры (?shallow=true) — после него
+      return (await axios.get(`${FIREBASE_BASE_URL}/${p}.json${query}`, { timeout: 60000 })).data;
     } catch (e) {
       console.error(`  не удалось прочитать ${p}: ${e.message}`);
       return null;
     }
   };
-  const shallow = (await get('matches?shallow=true')) || {};
+  const shallow = await get('matches', '?shallow=true');
+  if (!shallow || typeof shallow !== 'object' || Array.isArray(shallow)) {
+    throw new Error('не удалось получить список матчей из Firebase (ответ не похож на список uuid)');
+  }
+  console.log(`Матчей в базе: ${Object.keys(shallow).length}`);
   const out = {};
   for (const uuid of Object.keys(shallow)) {
     if (matchFilter && !uuid.startsWith(matchFilter)) continue;
