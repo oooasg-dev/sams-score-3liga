@@ -166,6 +166,7 @@ async function main() {
   const startedAt = Date.now();
   let ws;
   let stopped = false;
+  let wsFailures = 0; // сколько раз подряд не удалось держать соединение
 
   async function handleUpdate(matchUuid, payload) {
     latestState[matchUuid] = payload;
@@ -268,9 +269,30 @@ async function main() {
   function connect() {
     if (stopped) return;
     console.log(`Подключаюсь к ${WS_URL} ...`);
-    ws = new WebSocket(WS_URL, { origin: `https://${LEAGUE}.sams-ticker.de` });
+    ws = new WebSocket(WS_URL, {
+      origin: `https://${LEAGUE}.sams-ticker.de`,
+      // те же заголовки, что и у REST-запроса (раньше WebSocket не отправлял даже User-Agent)
+      headers: {
+        'User-Agent': bridge.TICKER_HEADERS['User-Agent'],
+        'Accept-Language': bridge.TICKER_HEADERS['Accept-Language'],
+      },
+    });
 
-    ws.on('open', () => console.log('WebSocket подключен.'));
+    ws.on('open', () => { wsFailures = 0; console.log('WebSocket подключен.'); });
+
+    // Если сервер отказал при подключении (403 и т.п.), показываем, что именно он ответил,
+    // чтобы отличить блокировку адреса от остальных причин.
+    ws.on('unexpected-response', (req, res) => {
+      let body = '';
+      res.on('data', c => { if (body.length < 300) body += c; });
+      res.on('end', () => {
+        console.error(
+          `WebSocket: сервер ответил HTTP ${res.statusCode}; server=${res.headers.server || ''}; ` +
+          `pop=${res.headers['x-amz-cf-pop'] || ''}; ${body.replace(/\s+/g, ' ').slice(0, 200)}`
+        );
+        ws.terminate();
+      });
+    });
 
     ws.on('message', raw => {
       let msg;
@@ -287,12 +309,25 @@ async function main() {
 
     ws.on('close', (code) => {
       if (stopped) return;
-      console.warn(`Соединение закрыто (code ${code}), переподключаюсь через 3 сек...`);
-      setTimeout(connect, 3000);
+      wsFailures++;
+      // пауза растёт: 3, 6, 9 ... до 30 секунд, чтобы не долбить сервер при блокировке
+      const delay = Math.min(30000, 3000 * wsFailures);
+      console.warn(`Соединение закрыто (code ${code}), переподключаюсь через ${delay / 1000} сек...`);
+      if (wsFailures === 5) {
+        console.error(
+          '!!! WebSocket не подключается 5 раз подряд — живых обновлений нет. ' +
+          'Если выше написано HTTP 403, сервер блокирует адрес, с которого запущен слушатель: ' +
+          'запустите его с другого компьютера или из другой сети.'
+        );
+      }
+      setTimeout(connect, delay);
     });
 
     ws.on('error', (err) => {
-      console.error('Ошибка WebSocket:', err.message);
+      // отказ при подключении уже описан строкой выше (unexpected-response)
+      if (!/closed before the connection was established/.test(err.message)) {
+        console.error('Ошибка WebSocket:', err.message);
+      }
       // 'close' сработает следом и переподключит
     });
   }
