@@ -69,6 +69,9 @@ async function main() {
   // страница выбора матча). Его live дублируется в постоянную ветку program/live,
   // откуда читают титры vMix — адрес для титров не меняется никогда.
   const archived = new Set(); // объявлено выше стартового снимка, чтобы handleUpdate мог им пользоваться сразу
+  const archiving = new Set(); // матчи, архив которых пишется прямо сейчас
+  const archiveAttempts = {};  // matchUuid -> сколько раз пробовали сохранить архив
+  const MAX_ARCHIVE_ATTEMPTS = 5;
   let programUuid = null;
   const lastOut = {}; // matchUuid -> последний собранный payload (для мгновенной записи при смене эфира)
   async function refreshProgramUuid() {
@@ -211,19 +214,39 @@ async function main() {
     );
 
     // ---------- архивация при завершении матча ----------
-    if (payload.finished && !archived.has(matchUuid)) {
-      try {
-        await bridge.archiveFinishedMatch(payload, matchUuid, out.meta, watch.label);
-        archived.add(matchUuid);
-      } catch (e) {
-        console.error(`[${watch.label}] не удалось заархивировать матч:`, e.message);
+    await archiveIfNeeded(matchUuid);
+  }
+
+  // Сохраняет raw и stats завершённого матча. Безопасно вызывать сколько угодно раз:
+  // уже сохранённый матч и матч, который сохраняется прямо сейчас, пропускаются.
+  async function archiveIfNeeded(matchUuid) {
+    const payload = latestState[matchUuid];
+    const out = lastOut[matchUuid];
+    if (!payload || !payload.finished || !out) return;
+    if (archived.has(matchUuid) || archiving.has(matchUuid)) return;
+    if ((archiveAttempts[matchUuid] || 0) >= MAX_ARCHIVE_ATTEMPTS) return;
+    const label = watchByUuid.get(matchUuid).label;
+    archiving.add(matchUuid);
+    archiveAttempts[matchUuid] = (archiveAttempts[matchUuid] || 0) + 1;
+    try {
+      await bridge.archiveFinishedMatch(payload, matchUuid, out.meta, label);
+      archived.add(matchUuid);
+    } catch (e) {
+      console.error(`[${label}] не удалось заархивировать матч (попытка ${archiveAttempts[matchUuid]} из ${MAX_ARCHIVE_ATTEMPTS}):`, e.message);
+      if (archiveAttempts[matchUuid] >= MAX_ARCHIVE_ATTEMPTS) {
+        console.error(`!!! [${label}] архив НЕ сохранён. Матч остался в matches/${matchUuid}/live и history — статистику можно пересчитать: node recompute_stats_from_history.js --match=${matchUuid.slice(0, 8)} --write`);
       }
+    } finally {
+      archiving.delete(matchUuid);
     }
   }
 
+  // Останавливаться можно, только когда каждый матч уже сохранён (или попытки кончились).
+  // Раньше хватало признака finished, и слушатель мог выйти в середине записи архива.
   function allDone() {
     if (watchByUuid.size === 0) return false;
-    return [...watchByUuid.keys()].every(u => archived.has(u) || latestState[u]?.finished);
+    if (archiving.size > 0) return false;
+    return [...watchByUuid.keys()].every(u => archived.has(u) || (archiveAttempts[u] || 0) >= MAX_ARCHIVE_ATTEMPTS);
   }
 
   function connect() {
@@ -277,6 +300,8 @@ async function main() {
 
   // Периодически проверяем, не пора ли остановиться.
   const checkInterval = setInterval(() => {
+    // если запись архива раньше не удалась (сбой сети), повторяем попытку
+    for (const u of watchByUuid.keys()) archiveIfNeeded(u);
     if (allDone()) {
       console.log('=== Все отслеживаемые матчи завершены — останавливаюсь ===');
       stopped = true;
