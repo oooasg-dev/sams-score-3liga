@@ -21,6 +21,19 @@ function norm(s) {
   return (s || '').toLowerCase();
 }
 
+async function getWithRetry(url, config, attempts = 4, delayMs = 10000) {
+  for (let i = 1; ; i++) {
+    try {
+      return (await axios.get(url, config)).data;
+    } catch (e) {
+      if (i >= attempts) throw e;
+      const http = e.response ? ` (HTTP ${e.response.status})` : '';
+      console.error(`Попытка ${i} из ${attempts} не удалась${http}, повторяю через ${delayMs / 1000} с...`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2).map(norm);
   if (args.length === 0) {
@@ -28,7 +41,8 @@ async function main() {
     process.exit(1);
   }
 
-  const { data } = await axios.get(TICKER_URL, {
+  // Сервер тикера иногда отвечает 403 (CloudFront) с адресов GitHub, но не всегда — повторяем несколько раз.
+  const data = await getWithRetry(TICKER_URL, {
     // Заголовки как у самого сайта: без Origin/Referer бэкенд отдаёт 403 (CloudFront)
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36',
