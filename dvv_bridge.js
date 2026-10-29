@@ -38,7 +38,7 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const { computeRallyStats } = require('./compute_rally_stats');
+const { buildStats } = require('./recompute_stats_from_history');
 
 const TICKER_URL = 'https://backend.sams-ticker.de/live/indoor/tickers/dvv';
 // Заголовки как у самого сайта dvv.sams-ticker.de: с 28.10.2026 бэкенд (CloudFront)
@@ -390,15 +390,24 @@ async function archiveFinishedMatch(state, matchUuid, meta, label) {
     state,
   });
 
-  // 2) статистика розыгрышей
-  const stats = computeRallyStats(state);
+  // 2) статистика розыгрышей. Если слушатель вёл снимки площадки (matches/{uuid}/history),
+  //    считаем по ним — это учитывает либеро. Сеты без снимков считаются по событиям
+  //    и помечаются как приблизительные (stats.setMethods / stats.approximate).
+  let history = null;
+  try {
+    const res = await axios.get(`${FIREBASE_BASE_URL}/matches/${matchUuid}/history.json`, { timeout: 30000 });
+    history = res.data;
+  } catch (e) {
+    console.warn(`[${label}] не удалось прочитать history, считаю статистику только по событиям: ${e.message}`);
+  }
+  const stats = buildStats({ state, history });
   await axios.put(`${FIREBASE_BASE_URL}/matches/${matchUuid}/stats.json`, {
     computedAt: new Date().toISOString(),
     meta,
     ...stats,
   });
 
-  console.log(`[${label}] АРХИВ сохранён: matches/${matchUuid}/raw, matches/${matchUuid}/stats`);
+  console.log(`[${label}] АРХИВ сохранён: matches/${matchUuid}/raw, matches/${matchUuid}/stats (способ: ${stats.method})`);
   if (stats.warnings.length) {
     stats.warnings.forEach(w => console.warn(`[${label}] предупреждение статистики: ${w}`));
   }
